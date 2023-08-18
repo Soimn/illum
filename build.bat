@@ -20,8 +20,7 @@ if "%1" neq "" (
 set "compile_options= /nologo /W3 /Od /Zo /Z7 /RTC1 /MTd /I..\vendor"
 set "link_options= /incremental:no /opt:ref /subsystem:windows libvcruntime.lib libvcruntimed.lib Shell32.lib"
 
-cl %compile_options% ..\src\i_win32.c /link %link_options% user32.lib gdi32.lib opengl32.lib /pdb:illum_base.pdb /out:illum.exe
-cl %compile_options% ..\src\illum.c /LD /link %link_options% /pdb:illum.pdb /out:illum.dll
+cl %compile_options% ..\src\illum.c /link %link_options% user32.lib gdi32.lib opengl32.lib /pdb:illum_base.pdb /out:illum.exe
 
 :end
 endlocal
