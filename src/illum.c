@@ -27,6 +27,8 @@ typedef unsigned __int64 u64;
 typedef i64 imm;
 typedef u64 umm;
 
+typedef float f32;
+
 typedef u8 bool;
 #define true 1
 #define false 0
@@ -41,6 +43,13 @@ typedef struct String
 #define STRING(S) (String){ .data = (u8*)(S), sizeof(S) - 1 }
 
 #define ARRAY_SIZE(A) (sizeof(A)/sizeof(0[A]))
+
+#define CONCAT_(X, Y) X##Y
+#define CONCAT__(X, Y) CONCAT_(X, Y)
+#define CONCAT(X, Y) CONCAT__(X, Y)
+
+#define STRINGIFY_(X) #X
+#define STRINGIFY(X) STRINGIFY_(X)
 
 bool
 String_Match(String s0, String s1)
@@ -60,9 +69,33 @@ String RequiredGLExtensions[] = {
 	ISTRING("WGL_ARB_pixel_format"),
 	ISTRING("WGL_ARB_create_context"),
 	ISTRING("WGL_ARB_create_context_profile"),
+	ISTRING("WGL_EXT_swap_control"),
 
 	ISTRING("WGL_ARB_pixel_format_float"),
 };
+
+#define GL_FUNC_LIST()                                 \
+	X(PFNWGLSWAPINTERVALEXTPROC, wglSwapIntervalEXT)     \
+	X(PFNGLUNIFORM2IPROC, glUniform2i)                   \
+	X(PFNGLUNIFORM2FPROC, glUniform2f)                   \
+	X(PFNGLCREATEVERTEXARRAYSPROC, glCreateVertexArrays) \
+	X(PFNGLBINDVERTEXARRAYPROC, glBindVertexArray)       \
+	X(PFNGLCREATESHADERPROC, glCreateShader)             \
+	X(PFNGLSHADERSOURCEPROC, glShaderSource)             \
+	X(PFNGLCOMPILESHADERPROC, glCompileShader)           \
+	X(PFNGLGETSHADERIVPROC, glGetShaderiv)               \
+	X(PFNGLGETSHADERINFOLOGPROC, glGetShaderInfoLog)     \
+	X(PFNGLCREATEPROGRAMPROC, glCreateProgram)           \
+	X(PFNGLATTACHSHADERPROC, glAttachShader)             \
+	X(PFNGLLINKPROGRAMPROC, glLinkProgram)               \
+	X(PFNGLGETPROGRAMIVPROC, glGetProgramiv)             \
+	X(PFNGLGETPROGRAMINFOLOGPROC, glGetProgramInfoLog)   \
+	X(PFNGLDELETESHADERPROC, glDeleteShader)             \
+	X(PFNGLUSEPROGRAMPROC, glUseProgram)                 \
+
+#define X(T, N) T N;
+GL_FUNC_LIST()
+#undef X
 
 bool
 CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* context)
@@ -167,6 +200,17 @@ CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* conte
 				break;
 			}
 
+#define X(T, N)                               \
+			N = (T)wglGetProcAddress(STRINGIFY(N)); \
+			if (!N)                                 \
+			{                                       \
+				/*Failed to load*/                    \
+				break;                                \
+			}
+
+			GL_FUNC_LIST()
+#undef X
+
 			succeeded = true;
 		} while (0);
 
@@ -251,7 +295,6 @@ CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* conte
 			};
 
 			*context = wglCreateContextAttribsARB(*dc, 0, context_attribute_list);
-			int a = GetLastError();
 			if (*context == 0)
 			{
 				//// ERROR: Failed to create gl context
@@ -301,18 +344,109 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 		return 1;
 	}
 
-	HWND window;
-	HDC dc;
-	HGLRC gl_context;
-	if (!CreateWindowAndGLContext(instance, &window, &dc, &gl_context))
+	bool failed_setup = false;
+
+	HWND window        = 0;
+	HDC dc             = 0;
+	HGLRC gl_context   = 0;
+	GLuint default_vao = 0;
+	GLuint program     = 0;
+
+	do
 	{
-		//// ERROR
-		return 1;
-	}
+		if (!CreateWindowAndGLContext(instance, &window, &dc, &gl_context))
+		{
+			//// ERROR
+			OutputDebugStringA("ERROR: Failed to ");
+			failed_setup = true;
+		}
+
+		u8* vert_shader_code =
+			"#version 450 core\n"
+			"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
+			"\n"
+			"out gl_PerVertex { vec4 gl_Position; };\n"
+			"\n"
+			"void\n"
+			"main()\n"
+			"{\n"
+			"  gl_Position = vec4(vec2(gl_VertexID%2, gl_VertexID/2)*4 - 1, 0, 1);\n"
+			"}\n"
+		;
+
+		u8* frag_shader_code =
+			"#version 450 core\n"
+			"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
+			"\n"
+			"layout(location = 0) uniform vec2 Resolution;\n"
+			"\n"
+			"out vec4 color;\n"
+			"\n"
+			"void\n"
+			"main()\n"
+			"{\n"
+			"  vec2 uv = (0.5*gl_FragCoord.xy + 0.5) / Resolution;"
+			"  color = vec4(uv, 0, 1);\n"
+			"}\n"
+		;
+
+		GLuint vert_shader = glCreateShader(GL_VERTEX_SHADER);
+		glShaderSource(vert_shader, 1, &vert_shader_code, 0);
+		glCompileShader(vert_shader);
+
+		GLint compile_status;
+		glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &compile_status);
+		if (compile_status == 0)
+		{
+			//// ERROR
+			u8 buffer[1024];
+			glGetShaderInfoLog(vert_shader, ARRAY_SIZE(buffer), 0, buffer);
+			OutputDebugStringA(buffer);
+			failed_setup = true;
+		}
+
+		GLuint frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
+		glShaderSource(frag_shader, 1, &frag_shader_code, 0);
+		glCompileShader(frag_shader);
+
+		glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &compile_status);
+		if (compile_status == 0)
+		{
+			//// ERROR
+			u8 buffer[1024];
+			glGetShaderInfoLog(frag_shader, ARRAY_SIZE(buffer), 0, buffer);
+			OutputDebugStringA(buffer);
+			failed_setup = true;
+		}
+
+		program = glCreateProgram();
+		glAttachShader(program, vert_shader);
+		glAttachShader(program, frag_shader);
+		glLinkProgram(program);
+
+		GLint link_status;
+		glGetProgramiv(program, GL_LINK_STATUS, &link_status);
+		if (link_status == 0)
+		{
+			//// ERROR
+			u8 buffer[1024];
+			glGetProgramInfoLog(program, ARRAY_SIZE(buffer), 0, buffer);
+			OutputDebugStringA(buffer);
+			failed_setup = true;
+		}
+
+		glDeleteShader(vert_shader);
+		glDeleteShader(frag_shader);
+
+		glCreateVertexArrays(1, &default_vao);
+	} while (0);
+
+	// TODO: Vsync
+	wglSwapIntervalEXT(1);
 
 	ShowWindow(window, SW_SHOW);
 
-	Running = true;
+	Running = !failed_setup;
 	while (Running)
 	{
 		MSG msg;
@@ -326,16 +460,25 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			else WindowProc(window, msg.message, msg.wParam, msg.lParam);
 		}
 
+		RECT client_rect;
+		GetClientRect(window, &client_rect);
+		u32 width  = client_rect.right - client_rect.left;
+		u32 height = client_rect.bottom - client_rect.top;
+		glViewport(0, 0, width, height);
+
 		Sleep(10);
 
-		glClearColor(1, 0, 1, 1);
-		glClear(GL_COLOR_BUFFER_BIT);
+		glBindVertexArray(default_vao);
+		glUseProgram(program);
+		glUniform2f(0, (f32)width, (f32)height);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+
 		SwapBuffers(dc);
 	}
 
-	wglDeleteContext(gl_context);
-	ReleaseDC(window, dc);
-	DestroyWindow(window);
+	if (gl_context != 0) wglDeleteContext(gl_context);
+	if (dc != 0)         ReleaseDC(window, dc);
+	if (window != 0)     DestroyWindow(window);
 
 	return 0;
 }
