@@ -385,8 +385,9 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			"void\n"
 			"main()\n"
 			"{\n"
-			"  vec2 uv = (0.5*gl_FragCoord.xy + 0.5) / Resolution;"
-			"  color = vec4(uv, 0, 1);\n"
+			"  vec2 uv = gl_FragCoord.xy / Resolution;\n"
+			"  vec2 auv = (2*uv - 1) * vec2(1, Resolution.y/Resolution.x);\n"
+			"  color = vec4((length(auv) < 0.5 ? uv : vec2(0)), 0, 1);\n"
 			"}\n"
 		;
 
