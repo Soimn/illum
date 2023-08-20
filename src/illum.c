@@ -439,7 +439,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				"{\n"
 				"  vec2 a = vec2(gl_VertexID%2, gl_VertexID/2);\n"
 				"  gl_Position = vec4(a*4 - 1, 0, 1);\n"
-				"  uv = a;\n"
+				"  uv = a*2;\n"
 				"}\n"
 			;
 
@@ -666,9 +666,10 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			glViewport(0, 0, width, height);
 
 			glUseProgram(comp_program);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, 0); // TODO: probably highly inefficient
 			glBindImageTexture(0, display_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
 			glUniform2f(0, (f32)width, (f32)height);
-			glDispatchCompute(width/32, height/32, 1);
+			glDispatchCompute(width/32 + (width%32 != 0), height/32 + (height%32 != 0), 1); // TODO
 			glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
 			Sleep(10);
