@@ -74,24 +74,30 @@ String RequiredGLExtensions[] = {
 	ISTRING("WGL_ARB_pixel_format_float"),
 };
 
-#define GL_FUNC_LIST()                                 \
-	X(PFNWGLSWAPINTERVALEXTPROC, wglSwapIntervalEXT)     \
-	X(PFNGLUNIFORM2IPROC, glUniform2i)                   \
-	X(PFNGLUNIFORM2FPROC, glUniform2f)                   \
-	X(PFNGLCREATEVERTEXARRAYSPROC, glCreateVertexArrays) \
-	X(PFNGLBINDVERTEXARRAYPROC, glBindVertexArray)       \
-	X(PFNGLCREATESHADERPROC, glCreateShader)             \
-	X(PFNGLSHADERSOURCEPROC, glShaderSource)             \
-	X(PFNGLCOMPILESHADERPROC, glCompileShader)           \
-	X(PFNGLGETSHADERIVPROC, glGetShaderiv)               \
-	X(PFNGLGETSHADERINFOLOGPROC, glGetShaderInfoLog)     \
-	X(PFNGLCREATEPROGRAMPROC, glCreateProgram)           \
-	X(PFNGLATTACHSHADERPROC, glAttachShader)             \
-	X(PFNGLLINKPROGRAMPROC, glLinkProgram)               \
-	X(PFNGLGETPROGRAMIVPROC, glGetProgramiv)             \
-	X(PFNGLGETPROGRAMINFOLOGPROC, glGetProgramInfoLog)   \
-	X(PFNGLDELETESHADERPROC, glDeleteShader)             \
-	X(PFNGLUSEPROGRAMPROC, glUseProgram)                 \
+#define GL_FUNC_LIST()                                     \
+	X(PFNWGLSWAPINTERVALEXTPROC, wglSwapIntervalEXT)         \
+	X(PFNGLUNIFORM2IPROC, glUniform2i)                       \
+	X(PFNGLUNIFORM2FPROC, glUniform2f)                       \
+	X(PFNGLCREATEVERTEXARRAYSPROC, glCreateVertexArrays)     \
+	X(PFNGLBINDVERTEXARRAYPROC, glBindVertexArray)           \
+	X(PFNGLCREATESHADERPROC, glCreateShader)                 \
+	X(PFNGLSHADERSOURCEPROC, glShaderSource)                 \
+	X(PFNGLCOMPILESHADERPROC, glCompileShader)               \
+	X(PFNGLGETSHADERIVPROC, glGetShaderiv)                   \
+	X(PFNGLGETSHADERINFOLOGPROC, glGetShaderInfoLog)         \
+	X(PFNGLCREATEPROGRAMPROC, glCreateProgram)               \
+	X(PFNGLATTACHSHADERPROC, glAttachShader)                 \
+	X(PFNGLLINKPROGRAMPROC, glLinkProgram)                   \
+	X(PFNGLGETPROGRAMIVPROC, glGetProgramiv)                 \
+	X(PFNGLGETPROGRAMINFOLOGPROC, glGetProgramInfoLog)       \
+	X(PFNGLDELETESHADERPROC, glDeleteShader)                 \
+	X(PFNGLUSEPROGRAMPROC, glUseProgram)                     \
+  X(PFNGLDISPATCHCOMPUTEPROC, glDispatchCompute)           \
+  X(PFNGLMEMORYBARRIERPROC, glMemoryBarrier)               \
+	X(PFNGLDEBUGMESSAGECALLBACKPROC, glDebugMessageCallback) \
+	X(PFNGLVALIDATEPROGRAMPROC, glValidateProgram)           \
+	X(PFNGLACTIVETEXTUREPROC, glActiveTexture)               \
+	X(PFNGLBINDIMAGETEXTUREPROC, glBindImageTexture)         \
 
 #define X(T, N) T N;
 GL_FUNC_LIST()
@@ -332,6 +338,16 @@ WindowProc(HWND window, UINT msg_code, WPARAM wparam, LPARAM lparam)
 	else return DefWindowProcW(window, msg_code, wparam, lparam);
 }
 
+void
+GLDebugProc(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message, const void *userParam)
+{
+	if (severity != GL_DEBUG_SEVERITY_NOTIFICATION)
+	{
+		OutputDebugStringA(message);
+		OutputDebugStringA("\n");
+	}
+}
+
 int
 wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_cmd)
 {
@@ -346,135 +362,326 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 
 	bool failed_setup = false;
 
-	HWND window        = 0;
-	HDC dc             = 0;
-	HGLRC gl_context   = 0;
-	GLuint default_vao = 0;
-	GLuint program     = 0;
+	HWND window         = 0;
+	HDC dc              = 0;
+	HGLRC gl_context    = 0;
+	GLuint default_vao  = 0;
+	GLuint disp_program = 0;
+	GLuint comp_program = 0;
+
+	GLuint display_texture = 0;
 
 	do
 	{
+		u32 scratch_memory_size = 2*1024*1024;
+		u8* scratch_memory = VirtualAlloc(0, scratch_memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+		if (scratch_memory == 0)
+		{
+			//// ERROR
+			OutputDebugStringA("ERROR: Failed to allocate memory for startup\n");
+			failed_setup = true;
+			break;
+		}
+
+		{ /// Set working directory
+			u32 scratch_memory_size_wchars = scratch_memory_size/sizeof(WCHAR);
+
+			u32 result = GetModuleFileNameW(0, (WCHAR*)scratch_memory, scratch_memory_size_wchars);
+			if (result == 0 || result >= scratch_memory_size_wchars-1)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to query current exe path\n");
+				failed_setup = true;
+				break;
+			}
+
+			((WCHAR*)scratch_memory)[result] = 0;
+
+			WCHAR* last_slash = (WCHAR*)scratch_memory;
+			for (WCHAR* scan = last_slash; *scan != 0; ++scan)
+			{
+				if (*scan == '/' || *scan == '\\') last_slash = scan;
+			}
+
+			*(last_slash + 1) = 0;
+
+			if (!SetCurrentDirectoryW((WCHAR*)scratch_memory))
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to set working directory\n");
+				failed_setup = true;
+				break;
+			}
+		}
+
 		if (!CreateWindowAndGLContext(instance, &window, &dc, &gl_context))
 		{
 			//// ERROR
-			OutputDebugStringA("ERROR: Failed to ");
+			OutputDebugStringA("ERROR: Failed to create a gl enabled window\n");
 			failed_setup = true;
+			break;
 		}
 
-		u8* vert_shader_code =
-			"#version 450 core\n"
-			"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
-			"\n"
-			"out gl_PerVertex { vec4 gl_Position; };\n"
-			"\n"
-			"void\n"
-			"main()\n"
-			"{\n"
-			"  gl_Position = vec4(vec2(gl_VertexID%2, gl_VertexID/2)*4 - 1, 0, 1);\n"
-			"}\n"
-		;
+		glEnable(GL_DEBUG_OUTPUT);
+		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+		glDebugMessageCallback(GLDebugProc, 0);
 
-		u8* frag_shader_code =
-			"#version 450 core\n"
-			"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
-			"\n"
-			"layout(location = 0) uniform vec2 Resolution;\n"
-			"\n"
-			"out vec4 color;\n"
-			"\n"
-			"void\n"
-			"main()\n"
-			"{\n"
-			"  vec2 uv = gl_FragCoord.xy / Resolution;\n"
-			"  vec2 auv = (2*uv - 1) * vec2(1, Resolution.y/Resolution.x);\n"
-			"  color = vec4((length(auv) < 0.5 ? uv : vec2(0)), 0, 1);\n"
-			"}\n"
-		;
+		{ /// Upload display program
+			u8* vert_shader_code =
+				"#version 450 core\n"
+				"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
+				"\n"
+				"out gl_PerVertex { vec4 gl_Position; };\n"
+				"out vec2 uv;\n"
+				"\n"
+				"void\n"
+				"main()\n"
+				"{\n"
+				"  vec2 a = vec2(gl_VertexID%2, gl_VertexID/2);\n"
+				"  gl_Position = vec4(a*4 - 1, 0, 1);\n"
+				"  uv = a;\n"
+				"}\n"
+			;
 
-		GLuint vert_shader = glCreateShader(GL_VERTEX_SHADER);
-		glShaderSource(vert_shader, 1, &vert_shader_code, 0);
-		glCompileShader(vert_shader);
+			u8* frag_shader_code =
+				"#version 450 core\n"
+				"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
+				"\n"
+				"layout(location = 0) uniform vec2 Resolution;\n"
+				"\n"
+				"layout(binding = 0) uniform sampler2D DisplayTexture;\n"
+				"\n"
+				"in vec2 uv;\n"
+				"\n"
+				"out vec4 color;\n"
+				"\n"
+				"void\n"
+				"main()\n"
+				"{\n"
+				/*"  vec2 uv = gl_FragCoord.xy / Resolution;\n"
+				"  vec2 auv = (2*uv - 1) * vec2(1, Resolution.y/Resolution.x);\n"
+				"  color = vec4((length(auv) < 0.5 ? uv : vec2(0)), 0, 1);\n"*/
+				"  color = vec4(texture(DisplayTexture, uv).rgb, 1);\n"
+				"}\n"
+			;
 
-		GLint compile_status;
-		glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &compile_status);
-		if (compile_status == 0)
-		{
-			//// ERROR
-			u8 buffer[1024];
-			glGetShaderInfoLog(vert_shader, ARRAY_SIZE(buffer), 0, buffer);
-			OutputDebugStringA(buffer);
-			failed_setup = true;
+			GLuint vert_shader = glCreateShader(GL_VERTEX_SHADER);
+			glShaderSource(vert_shader, 1, &vert_shader_code, 0);
+			glCompileShader(vert_shader);
+
+			GLint status;
+			glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetShaderInfoLog(vert_shader, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to compile vertex shader. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			GLuint frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
+			glShaderSource(frag_shader, 1, &frag_shader_code, 0);
+			glCompileShader(frag_shader);
+
+			glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetShaderInfoLog(frag_shader, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to compile fragment shader. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			disp_program = glCreateProgram();
+			glAttachShader(disp_program, vert_shader);
+			glAttachShader(disp_program, frag_shader);
+			glLinkProgram(disp_program);
+
+			glGetProgramiv(disp_program, GL_LINK_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetProgramInfoLog(disp_program, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to link display disp_program. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			glValidateProgram(disp_program);
+			glGetProgramiv(disp_program, GL_VALIDATE_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetProgramInfoLog(disp_program, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to validate display disp_program. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			glDeleteShader(vert_shader);
+			glDeleteShader(frag_shader);
 		}
 
-		GLuint frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-		glShaderSource(frag_shader, 1, &frag_shader_code, 0);
-		glCompileShader(frag_shader);
+		{ /// Upload tracing compute program
+			// TODO: Decide on where resources should be stored
+			HANDLE comp_shader_code_file = CreateFileW(L"..\\src\\tracing.glsl", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+			if (comp_shader_code_file == INVALID_HANDLE_VALUE)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to open tracing compute shader file\n");
+				failed_setup = true;
+				break;
+			}
 
-		glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &compile_status);
-		if (compile_status == 0)
-		{
-			//// ERROR
-			u8 buffer[1024];
-			glGetShaderInfoLog(frag_shader, ARRAY_SIZE(buffer), 0, buffer);
-			OutputDebugStringA(buffer);
-			failed_setup = true;
+			LARGE_INTEGER file_size;
+			u32 read_bytes;
+			if (!GetFileSizeEx(comp_shader_code_file, &file_size))
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to query size of tracing compute shader file\n");
+				failed_setup = true;
+			}
+			else if (file_size.HighPart != 0 || file_size.LowPart > scratch_memory_size)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Tracing compute shader file is too large\n");
+				failed_setup = true;
+			}
+			else if (!ReadFile(comp_shader_code_file, scratch_memory, file_size.LowPart, &read_bytes, 0) || read_bytes != file_size.LowPart)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to read tracing compute shader file\n");
+				failed_setup = true;
+			}
+
+			CloseHandle(comp_shader_code_file);
+			if (failed_setup) break;
+
+			GLint status;
+			GLuint comp_shader = glCreateShader(GL_COMPUTE_SHADER);
+			glShaderSource(comp_shader, 1, &scratch_memory, 0);
+			glCompileShader(comp_shader);
+
+			glGetShaderiv(comp_shader, GL_COMPILE_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetShaderInfoLog(comp_shader, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to compile compute shader. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			comp_program = glCreateProgram();
+			glAttachShader(comp_program, comp_shader);
+			glLinkProgram(comp_program);
+
+			glGetProgramiv(comp_program, GL_LINK_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetProgramInfoLog(comp_program, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to link tracing compute disp_program. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			glValidateProgram(comp_program);
+			glGetProgramiv(comp_program, GL_VALIDATE_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetProgramInfoLog(comp_program, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to validate tracing compute disp_program. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			glDeleteShader(comp_shader);
 		}
 
-		program = glCreateProgram();
-		glAttachShader(program, vert_shader);
-		glAttachShader(program, frag_shader);
-		glLinkProgram(program);
-
-		GLint link_status;
-		glGetProgramiv(program, GL_LINK_STATUS, &link_status);
-		if (link_status == 0)
-		{
-			//// ERROR
-			u8 buffer[1024];
-			glGetProgramInfoLog(program, ARRAY_SIZE(buffer), 0, buffer);
-			OutputDebugStringA(buffer);
-			failed_setup = true;
+		{ /// Prepare tracing textures
+			glActiveTexture(GL_TEXTURE0);
+			glGenTextures(1, &display_texture);
+			glBindTexture(GL_TEXTURE_2D, display_texture);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 1920, 1080, 0, GL_RGBA, GL_FLOAT, 0); // TODO: dimensions
+			glBindImageTexture(0, display_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
 		}
-
-		glDeleteShader(vert_shader);
-		glDeleteShader(frag_shader);
 
 		glCreateVertexArrays(1, &default_vao);
 	} while (0);
 
-	// TODO: Vsync
-	wglSwapIntervalEXT(1);
-
-	ShowWindow(window, SW_SHOW);
-
-	Running = !failed_setup;
-	while (Running)
+	if (!failed_setup)
 	{
-		MSG msg;
-		while (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE))
+		// TODO: Vsync
+		wglSwapIntervalEXT(1);
+
+		ShowWindow(window, SW_SHOW);
+
+		Running = true;
+		while (Running)
 		{
-			if (msg.message == WM_QUIT || msg.message == WM_CLOSE)
+			MSG msg;
+			while (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE))
 			{
-				Running = false;
-				break;
+				if (msg.message == WM_QUIT || msg.message == WM_CLOSE)
+				{
+					Running = false;
+					break;
+				}
+				else WindowProc(window, msg.message, msg.wParam, msg.lParam);
 			}
-			else WindowProc(window, msg.message, msg.wParam, msg.lParam);
+
+			RECT client_rect;
+			GetClientRect(window, &client_rect);
+			u32 width  = client_rect.right - client_rect.left;
+			u32 height = client_rect.bottom - client_rect.top;
+			glViewport(0, 0, width, height);
+
+			glUseProgram(comp_program);
+			glBindImageTexture(0, display_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
+			glUniform2f(0, (f32)width, (f32)height);
+			glDispatchCompute(width/32, height/32, 1);
+			glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+			Sleep(10);
+
+			glBindVertexArray(default_vao);
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, display_texture);
+			glUseProgram(disp_program);
+			glUniform2f(0, (f32)width, (f32)height);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+
+			SwapBuffers(dc);
 		}
-
-		RECT client_rect;
-		GetClientRect(window, &client_rect);
-		u32 width  = client_rect.right - client_rect.left;
-		u32 height = client_rect.bottom - client_rect.top;
-		glViewport(0, 0, width, height);
-
-		Sleep(10);
-
-		glBindVertexArray(default_vao);
-		glUseProgram(program);
-		glUniform2f(0, (f32)width, (f32)height);
-		glDrawArrays(GL_TRIANGLES, 0, 3);
-
-		SwapBuffers(dc);
 	}
 
 	if (gl_context != 0) wglDeleteContext(gl_context);
