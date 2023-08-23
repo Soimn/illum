@@ -98,6 +98,8 @@ String RequiredGLExtensions[] = {
 	X(PFNGLVALIDATEPROGRAMPROC, glValidateProgram)           \
 	X(PFNGLACTIVETEXTUREPROC, glActiveTexture)               \
 	X(PFNGLBINDIMAGETEXTUREPROC, glBindImageTexture)         \
+	X(PFNGLUNIFORM1IPROC, glUniform1i)                       \
+	X(PFNGLUNIFORM1UIPROC, glUniform1ui)                     \
 
 #define X(T, N) T N;
 GL_FUNC_LIST()
@@ -568,7 +570,40 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				failed_setup = true;
 			}
 
+			u32 comp_shader_code_size = read_bytes;
+
 			CloseHandle(comp_shader_code_file);
+			if (failed_setup) break;
+
+			HANDLE comp_pcg_code_file = CreateFileW(L"..\\vendor\\pcg32\\pcg32.glsl", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+			if (comp_pcg_code_file == INVALID_HANDLE_VALUE)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to open pcg32 compute shader file\n");
+				failed_setup = true;
+				break;
+			}
+
+			if (!GetFileSizeEx(comp_pcg_code_file, &file_size))
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to query size of pcg32 compute shader file\n");
+				failed_setup = true;
+			}
+			else if (file_size.HighPart != 0 || file_size.LowPart + comp_shader_code_size-1 > scratch_memory_size)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: pcg32 compute shader file is too large\n");
+				failed_setup = true;
+			}
+			else if (!ReadFile(comp_pcg_code_file, scratch_memory + comp_shader_code_size-1, file_size.LowPart, &read_bytes, 0) || read_bytes != file_size.LowPart)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to read pcg32 compute shader file\n");
+				failed_setup = true;
+			}
+
+			CloseHandle(comp_pcg_code_file);
 			if (failed_setup) break;
 
 			GLint status;
@@ -645,6 +680,8 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 
 		ShowWindow(window, SW_SHOW);
 
+		u32 frame_index = 0;
+
 		Running = true;
 		while (Running)
 		{
@@ -669,6 +706,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, 0); // TODO: probably highly inefficient
 			glBindImageTexture(0, display_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
 			glUniform2f(0, (f32)width, (f32)height);
+			glUniform1ui(1, frame_index);
 			glDispatchCompute(width/32 + (width%32 != 0), height/32 + (height%32 != 0), 1); // TODO
 			glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
@@ -682,6 +720,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 
 			SwapBuffers(dc);
+			frame_index += 1;
 		}
 	}
 

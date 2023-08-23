@@ -5,6 +5,24 @@ layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 layout(rgba32f, binding = 0) uniform image2D DisplayTexture;
 
 layout(location = 0) uniform vec2 Resolution;
+layout(location = 1) uniform uint FrameIndex;
+
+struct pcg32_state
+{
+	uint state;
+	uint increment;
+};
+
+void pcg32_seed(inout pcg32_state pcg_state, uint seed, uint increment);
+uint pcg32_next(inout pcg32_state pcg_state);
+
+pcg32_state pcg_state;
+
+float
+Random01()
+{
+	return pcg32_next(pcg_state) * 2.3283064365386962890625e-10;
+}
 
 struct Hit_Data
 {
@@ -34,6 +52,10 @@ RaySphere(vec3 origin, vec3 ray, vec3 sphere_pos, float sphere_r)
 void
 main()
 {
+	uint invocation_index = gl_GlobalInvocationID.y*gl_NumWorkGroups.x*gl_WorkGroupSize.x + gl_GlobalInvocationID.x;
+	uint seed             = (invocation_index + FrameIndex*187272781)*178525871;
+	pcg32_seed(pcg_state, seed, invocation_index);
+
 	ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
 	if (pos.x >= Resolution.x || pos.y >= Resolution.y) return;
 
