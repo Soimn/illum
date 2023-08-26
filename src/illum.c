@@ -100,6 +100,7 @@ String RequiredGLExtensions[] = {
 	X(PFNGLBINDIMAGETEXTUREPROC, glBindImageTexture)         \
 	X(PFNGLUNIFORM1IPROC, glUniform1i)                       \
 	X(PFNGLUNIFORM1UIPROC, glUniform1ui)                     \
+	X(PFNGLCLEARTEXIMAGEPROC, glClearTexImage)               \
 
 #define X(T, N) T N;
 GL_FUNC_LIST()
@@ -364,14 +365,20 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 
 	bool failed_setup = false;
 
-	HWND window         = 0;
-	HDC dc              = 0;
-	HGLRC gl_context    = 0;
-	GLuint default_vao  = 0;
-	GLuint disp_program = 0;
-	GLuint comp_program = 0;
+	HWND window               = 0;
+	HDC dc                    = 0;
+	HGLRC gl_context          = 0;
+	GLuint default_vao        = 0;
+	GLuint disp_program       = 0;
+	GLuint tracing_program    = 0;
+	GLuint conversion_program = 0;
 
-	GLuint display_texture = 0;
+	GLuint sum_texture          = 0;
+	GLuint compensation_texture = 0;
+	GLuint display_texture      = 0;
+
+	u32 texture_width  = 1920;
+	u32 texture_height = 1080;
 
 	do
 	{
@@ -451,7 +458,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				"\n"
 				"layout(location = 0) uniform vec2 Resolution;\n"
 				"\n"
-				"layout(binding = 0) uniform sampler2D DisplayTexture;\n"
+				"uniform sampler2D DisplayTexture;\n"
 				"\n"
 				"in vec2 uv;\n"
 				"\n"
@@ -557,7 +564,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				OutputDebugStringA("ERROR: Failed to query size of tracing compute shader file\n");
 				failed_setup = true;
 			}
-			else if (file_size.HighPart != 0 || file_size.LowPart > scratch_memory_size)
+			else if (file_size.HighPart != 0 || file_size.LowPart+1 > scratch_memory_size)
 			{
 				//// ERROR
 				OutputDebugStringA("ERROR: Tracing compute shader file is too large\n");
@@ -590,18 +597,20 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				OutputDebugStringA("ERROR: Failed to query size of pcg32 compute shader file\n");
 				failed_setup = true;
 			}
-			else if (file_size.HighPart != 0 || file_size.LowPart + comp_shader_code_size-1 > scratch_memory_size)
+			else if (file_size.HighPart != 0 || file_size.LowPart+1 + comp_shader_code_size > scratch_memory_size)
 			{
 				//// ERROR
 				OutputDebugStringA("ERROR: pcg32 compute shader file is too large\n");
 				failed_setup = true;
 			}
-			else if (!ReadFile(comp_pcg_code_file, scratch_memory + comp_shader_code_size-1, file_size.LowPart, &read_bytes, 0) || read_bytes != file_size.LowPart)
+			else if (!ReadFile(comp_pcg_code_file, scratch_memory + comp_shader_code_size, file_size.LowPart, &read_bytes, 0) || read_bytes != file_size.LowPart)
 			{
 				//// ERROR
 				OutputDebugStringA("ERROR: Failed to read pcg32 compute shader file\n");
 				failed_setup = true;
 			}
+
+			scratch_memory[comp_shader_code_size + read_bytes] = 0;
 
 			CloseHandle(comp_pcg_code_file);
 			if (failed_setup) break;
@@ -617,38 +626,127 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				//// ERROR
 				u8 buffer[1024];
 				glGetShaderInfoLog(comp_shader, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to compile compute shader. OpenGL reports the following error message:\n");
+				OutputDebugStringA("ERROR: Failed to compile tracing compute shader. OpenGL reports the following error message:\n");
 				OutputDebugStringA(buffer);
 				OutputDebugStringA("\n");
 				failed_setup = true;
 				break;
 			}
 
-			comp_program = glCreateProgram();
-			glAttachShader(comp_program, comp_shader);
-			glLinkProgram(comp_program);
+			tracing_program = glCreateProgram();
+			glAttachShader(tracing_program, comp_shader);
+			glLinkProgram(tracing_program);
 
-			glGetProgramiv(comp_program, GL_LINK_STATUS, &status);
+			glGetProgramiv(tracing_program, GL_LINK_STATUS, &status);
 			if (status == 0)
 			{
 				//// ERROR
 				u8 buffer[1024];
-				glGetProgramInfoLog(comp_program, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to link tracing compute disp_program. OpenGL reports the following error message:\n");
+				glGetProgramInfoLog(tracing_program, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to link tracing compute program. OpenGL reports the following error message:\n");
 				OutputDebugStringA(buffer);
 				OutputDebugStringA("\n");
 				failed_setup = true;
 				break;
 			}
 
-			glValidateProgram(comp_program);
-			glGetProgramiv(comp_program, GL_VALIDATE_STATUS, &status);
+			glValidateProgram(tracing_program);
+			glGetProgramiv(tracing_program, GL_VALIDATE_STATUS, &status);
 			if (status == 0)
 			{
 				//// ERROR
 				u8 buffer[1024];
-				glGetProgramInfoLog(comp_program, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to validate tracing compute disp_program. OpenGL reports the following error message:\n");
+				glGetProgramInfoLog(tracing_program, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to validate tracing compute program. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			glDeleteShader(comp_shader);
+		}
+
+		{ /// Upload conversion compute program
+			// TODO: Decide on where resources should be stored
+			HANDLE comp_shader_code_file = CreateFileW(L"..\\src\\conversion.glsl", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+			if (comp_shader_code_file == INVALID_HANDLE_VALUE)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to open conversion compute shader file\n");
+				failed_setup = true;
+				break;
+			}
+
+			LARGE_INTEGER file_size;
+			u32 read_bytes;
+			if (!GetFileSizeEx(comp_shader_code_file, &file_size))
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to query size of conversion compute shader file\n");
+				failed_setup = true;
+			}
+			else if (file_size.HighPart != 0 || file_size.LowPart+1 > scratch_memory_size)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: conversion compute shader file is too large\n");
+				failed_setup = true;
+			}
+			else if (!ReadFile(comp_shader_code_file, scratch_memory, file_size.LowPart, &read_bytes, 0) || read_bytes != file_size.LowPart)
+			{
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to read conversion compute shader file\n");
+				failed_setup = true;
+			}
+
+			scratch_memory[read_bytes] = 0;
+
+			CloseHandle(comp_shader_code_file);
+			if (failed_setup) break;
+
+			GLint status;
+			GLuint comp_shader = glCreateShader(GL_COMPUTE_SHADER);
+			glShaderSource(comp_shader, 1, &scratch_memory, 0);
+			glCompileShader(comp_shader);
+
+			glGetShaderiv(comp_shader, GL_COMPILE_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetShaderInfoLog(comp_shader, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to compile conversion compute shader. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			conversion_program = glCreateProgram();
+			glAttachShader(conversion_program, comp_shader);
+			glLinkProgram(conversion_program);
+
+			glGetProgramiv(conversion_program, GL_LINK_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetProgramInfoLog(conversion_program, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to link conversion compute program. OpenGL reports the following error message:\n");
+				OutputDebugStringA(buffer);
+				OutputDebugStringA("\n");
+				failed_setup = true;
+				break;
+			}
+
+			glValidateProgram(conversion_program);
+			glGetProgramiv(conversion_program, GL_VALIDATE_STATUS, &status);
+			if (status == 0)
+			{
+				//// ERROR
+				u8 buffer[1024];
+				glGetProgramInfoLog(conversion_program, ARRAY_SIZE(buffer), 0, buffer);
+				OutputDebugStringA("ERROR: Failed to validate conversion compute program. OpenGL reports the following error message:\n");
 				OutputDebugStringA(buffer);
 				OutputDebugStringA("\n");
 				failed_setup = true;
@@ -666,8 +764,28 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 1920, 1080, 0, GL_RGBA, GL_FLOAT, 0); // TODO: dimensions
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
 			glBindImageTexture(0, display_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
+
+			glActiveTexture(GL_TEXTURE1);
+			glGenTextures(1, &sum_texture);
+			glBindTexture(GL_TEXTURE_2D, sum_texture);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+			glBindImageTexture(0, sum_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
+
+			glActiveTexture(GL_TEXTURE2);
+			glGenTextures(1, &compensation_texture);
+			glBindTexture(GL_TEXTURE_2D, compensation_texture);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+			glBindImageTexture(0, compensation_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
 		}
 
 		glCreateVertexArrays(1, &default_vao);
@@ -702,13 +820,47 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			u32 height = client_rect.bottom - client_rect.top;
 			glViewport(0, 0, width, height);
 
-			glUseProgram(comp_program);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, 0); // TODO: probably highly inefficient
-			glBindImageTexture(0, display_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
+			if (texture_width != width || texture_height != height)
+			{
+				texture_width  = width;
+				texture_height = height;
+
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, display_texture);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+
+				glActiveTexture(GL_TEXTURE1);
+				glBindTexture(GL_TEXTURE_2D, sum_texture);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+				float f[4] = {0, 0, 0, 0};
+				glClearTexImage(sum_texture, 0, GL_RGBA, GL_FLOAT, f);
+
+				glActiveTexture(GL_TEXTURE2);
+				glBindTexture(GL_TEXTURE_2D, compensation_texture);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+				glClearTexImage(compensation_texture, 0, GL_RGBA, GL_FLOAT, f);
+
+				glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+				frame_index = 0;
+			}
+
+			glUseProgram(tracing_program);
+			glBindImageTexture(0, sum_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
+			glBindImageTexture(1, compensation_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
 			glUniform2f(0, (f32)width, (f32)height);
 			glUniform1ui(1, frame_index);
 			glDispatchCompute(width/32 + (width%32 != 0), height/32 + (height%32 != 0), 1); // TODO
 			glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+			glUseProgram(conversion_program);
+			glBindImageTexture(0, sum_texture, 0, 0, 0, GL_READ_ONLY, GL_RGBA32F);
+			glBindImageTexture(1, compensation_texture, 0, 0, 0, GL_READ_ONLY, GL_RGBA32F);
+			glBindImageTexture(2, display_texture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA32F);
+			glUniform2f(0, (f32)width, (f32)height);
+			glDispatchCompute(width/32 + (width%32 != 0), height/32 + (height%32 != 0), 1); // TODO
+			glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+			frame_index += 1;
 
 			Sleep(10);
 
@@ -720,7 +872,6 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 
 			SwapBuffers(dc);
-			frame_index += 1;
 		}
 	}
 
