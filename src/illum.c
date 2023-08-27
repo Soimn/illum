@@ -1,3 +1,5 @@
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
 #define UNICODE 1
 #define WIN32_LEAN_AND_MEAN 1
 
@@ -13,16 +15,17 @@
 #undef near
 
 #include <stdio.h>
+#pragma clang diagnostic pop
 
-typedef signed __int8  i8;
-typedef signed __int16 i16;
-typedef signed __int32 i32;
-typedef signed __int64 i64;
+typedef __INT8_TYPE__  i8;
+typedef __INT16_TYPE__ i16;
+typedef __INT32_TYPE__ i32;
+typedef __INT64_TYPE__ i64;
 
-typedef unsigned __int8  u8;
-typedef unsigned __int16 u16;
-typedef unsigned __int32 u32;
-typedef unsigned __int64 u64;
+typedef __UINT8_TYPE__  u8;
+typedef __UINT16_TYPE__ u16;
+typedef __UINT32_TYPE__ u32;
+typedef __UINT64_TYPE__ u64;
 
 typedef i64 imm;
 typedef u64 umm;
@@ -61,11 +64,9 @@ String_Match(String s0, String s1)
 	return result;
 }
 
-/// --------------------------------------------------------------------------------------------
+static bool Running = false;
 
-bool Running = false;
-
-String RequiredGLExtensions[] = {
+static String RequiredGLExtensions[] = {
 	ISTRING("WGL_ARB_pixel_format"),
 	ISTRING("WGL_ARB_create_context"),
 	ISTRING("WGL_ARB_create_context_profile"),
@@ -102,7 +103,7 @@ String RequiredGLExtensions[] = {
 	X(PFNGLUNIFORM1UIPROC, glUniform1ui)                     \
 	X(PFNGLCLEARTEXIMAGEPROC, glClearTexImage)               \
 
-#define X(T, N) T N;
+#define X(T, N) static T N;
 GL_FUNC_LIST()
 #undef X
 
@@ -111,8 +112,8 @@ CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* conte
 {
 	bool succeeded = false;
 
-	PFNWGLCHOOSEPIXELFORMATARBPROC wglChoosePixelFormatARB;
-	PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB;
+	PFNWGLCHOOSEPIXELFORMATARBPROC wglChoosePixelFormatARB       = 0;
+	PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB = 0;
 	{ /// Load WGL functions
 		HWND dummy_window   = 0;
 		HDC dummy_dc        = 0;
@@ -123,14 +124,16 @@ CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* conte
 			dummy_window = CreateWindowA("STATIC", "IllumDummyWindow", WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, 0, 0);
 			if (dummy_window == 0)
 			{
-				//// ERROR: Failed to create dummy window for loading WGL
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to create dummy window for loading WGL\n");
 				break;
 			}
 
 			dummy_dc = GetDC(dummy_window);
 			if (dummy_dc == 0)
 			{
-				//// ERROR: Failed to get device context of dummy window for loading WGL
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to get device context of dummy window for loading WGL\n");
 				break;
 			}
 
@@ -154,30 +157,34 @@ CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* conte
 			int format_index = ChoosePixelFormat(dummy_dc, &format);
 			if (format_index == 0 || !SetPixelFormat(dummy_dc, format_index, &format))
 			{
-				//// ERROR: Failed to set pixel format on dummy window for loading WGL
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to set pixel format on dummy window for loading WGL\n");
 				break;
 			}
 
 			dummy_context = wglCreateContext(dummy_dc);
 			if (dummy_context == 0 || !wglMakeCurrent(dummy_dc, dummy_context))
 			{
-				//// ERROR: Failed to create dummy context for loading WGL functions
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to create dummy context for loading WGL functions\n");
 				break;
 			}
 
 			PFNWGLGETEXTENSIONSSTRINGARBPROC wglGetExtensionsStringARB = (PFNWGLGETEXTENSIONSSTRINGARBPROC)wglGetProcAddress("wglGetExtensionsStringARB");
-			wglChoosePixelFormatARB = (PFNWGLCHOOSEPIXELFORMATARBPROC)wglGetProcAddress("wglChoosePixelFormatARB");
+			wglChoosePixelFormatARB    = (PFNWGLCHOOSEPIXELFORMATARBPROC)wglGetProcAddress("wglChoosePixelFormatARB");
 			wglCreateContextAttribsARB = (PFNWGLCREATECONTEXTATTRIBSARBPROC)wglGetProcAddress("wglCreateContextAttribsARB");
 			if (wglGetExtensionsStringARB == 0 || wglChoosePixelFormatARB == 0 || wglCreateContextAttribsARB == 0)
 			{
-				//// ERROR: Failed to load necessary WGL functions
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to load necessary WGL functions\n");
 				break;
 			}
 
 			u8* extensions_string = (u8*)wglGetExtensionsStringARB(dummy_dc);
 			if (extensions_string == 0)
 			{
-				//// ERROR: Failed to query gl extensions
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to query gl extensions\n");
 				break;
 			}
 
@@ -205,16 +212,17 @@ CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* conte
 
 			if (found_extension_count != ARRAY_SIZE(RequiredGLExtensions))
 			{
-				//// ERROR: Not all required gl extensions are supported
+				//// ERROR
+				OutputDebugStringA("ERROR: Not all required gl extensions are supported\n");
 				break;
 			}
 
-#define X(T, N)                               \
-			N = (T)wglGetProcAddress(STRINGIFY(N)); \
-			if (!N)                                 \
-			{                                       \
-				/*Failed to load*/                    \
-				break;                                \
+#define X(T, N)                                                                         \
+			N = (T)wglGetProcAddress(STRINGIFY(N));                                           \
+			if (!N)                                                                           \
+			{                                                                                 \
+				OutputDebugStringA("ERROR: Failed to load GL function \"" STRINGIFY(N) "\"\n"); \
+				break;                                                                          \
 			}
 
 			GL_FUNC_LIST()
@@ -252,21 +260,24 @@ CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* conte
 			ATOM window_class_atom = RegisterClassExW(&window_class);
 			if (window_class_atom == 0)
 			{
-				//// ERROR: Failed to register window class
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to register window class\n");
 				break;
 			}
 
 			*window = CreateWindowExW(0, L"IllumWindowClassName", L"Illum", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, 0, 0);
 			if (*window == 0)
 			{
-				//// ERROR: Failed to create a window
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to create a window\n");
 				break;
 			}
 
 			*dc = GetDC(*window);
 			if (*dc == 0)
 			{
-				//// ERROR: Failed to get window device context
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to get window device context\n");
 				break;
 			}
 
@@ -284,14 +295,16 @@ CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* conte
 			int format_index;
 			if (!wglChoosePixelFormatARB(*dc, format_attribute_list, 0, 1, &format_index, &(UINT){0}))
 			{
-				//// ERROR: Failed to find an appropriate pixel format for the window
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to find an appropriate pixel format for the window\n");
 				break;
 			}
 
 			PIXELFORMATDESCRIPTOR format;
 			if (!DescribePixelFormat(*dc, format_index, sizeof(PIXELFORMATDESCRIPTOR), &format) || !SetPixelFormat(*dc, format_index, &format))
 			{
-				//// ERROR: Failed to set chosen pixel format
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to set chosen pixel format\n");
 				break;
 			}
 
@@ -306,13 +319,15 @@ CreateWindowAndGLContext(HINSTANCE instance, HWND* window, HDC* dc, HGLRC* conte
 			*context = wglCreateContextAttribsARB(*dc, 0, context_attribute_list);
 			if (*context == 0)
 			{
-				//// ERROR: Failed to create gl context
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to create gl context\n");
 				break;
 			}
 
 			if (!wglMakeCurrent(*dc, *context))
 			{
-				//// ERROR: Failed to make gl context current
+				//// ERROR
+				OutputDebugStringA("ERROR: Failed to make gl context current\n");
 				break;
 			}
 
@@ -349,6 +364,106 @@ GLDebugProc(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei leng
 		OutputDebugStringA(message);
 		OutputDebugStringA("\n");
 	}
+}
+
+bool
+CreateShaderProgram(GLchar* vert_shader_code, GLchar* frag_shader_code, GLchar* comp_shader_code, GLuint* program)
+{
+	GLint status;
+	GLchar buffer[1024];
+
+	GLuint vert_shader = 0;
+	GLuint frag_shader = 0;
+	GLuint comp_shader = 0;
+
+	if (vert_shader_code != 0)
+	{
+		vert_shader = glCreateShader(GL_VERTEX_SHADER);
+		glShaderSource(vert_shader, 1, (GLchar**)&vert_shader_code, 0);
+		glCompileShader(vert_shader);
+
+		glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &status);
+		if (status == 0)
+		{
+			//// ERROR
+			glGetShaderInfoLog(vert_shader, ARRAY_SIZE(buffer), 0, buffer);
+			OutputDebugStringA("ERROR: Failed to compile vertex shader. OpenGL reports the following error message:\n");
+			OutputDebugStringA(buffer);
+			OutputDebugStringA("\n");
+			return true;
+		}
+	}
+
+	if (frag_shader_code != 0)
+	{
+		frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
+		glShaderSource(frag_shader, 1, (GLchar**)&frag_shader_code, 0);
+		glCompileShader(frag_shader);
+
+		glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &status);
+		if (status == 0)
+		{
+			//// ERROR
+			glGetShaderInfoLog(frag_shader, ARRAY_SIZE(buffer), 0, buffer);
+			OutputDebugStringA("ERROR: Failed to compile fragment shader. OpenGL reports the following error message:\n");
+			OutputDebugStringA(buffer);
+			OutputDebugStringA("\n");
+			return true;
+		}
+	}
+
+	if (comp_shader_code != 0)
+	{
+		comp_shader = glCreateShader(GL_COMPUTE_SHADER);
+		glShaderSource(comp_shader, 1, (GLchar**)&comp_shader_code, 0);
+		glCompileShader(comp_shader);
+
+		glGetShaderiv(comp_shader, GL_COMPILE_STATUS, &status);
+		if (status == 0)
+		{
+			//// ERROR
+			glGetShaderInfoLog(comp_shader, ARRAY_SIZE(buffer), 0, buffer);
+			OutputDebugStringA("ERROR: Failed to compile compute shader. OpenGL reports the following error message:\n");
+			OutputDebugStringA(buffer);
+			OutputDebugStringA("\n");
+			return true;
+		}
+	}
+
+	*program = glCreateProgram();
+	if (vert_shader_code != 0) glAttachShader(*program, vert_shader);
+	if (frag_shader_code != 0) glAttachShader(*program, frag_shader);
+	if (comp_shader_code != 0) glAttachShader(*program, comp_shader);
+	glLinkProgram(*program);
+
+	glGetProgramiv(*program, GL_LINK_STATUS, &status);
+	if (status == 0)
+	{
+		//// ERROR
+		glGetProgramInfoLog(*program, ARRAY_SIZE(buffer), 0, buffer);
+		OutputDebugStringA("ERROR: Failed to link shader program. OpenGL reports the following error message:\n");
+		OutputDebugStringA(buffer);
+		OutputDebugStringA("\n");
+		return false;
+	}
+
+	glValidateProgram(*program);
+	glGetProgramiv(*program, GL_VALIDATE_STATUS, &status);
+	if (status == 0)
+	{
+		//// ERROR
+		glGetProgramInfoLog(*program, ARRAY_SIZE(buffer), 0, buffer);
+		OutputDebugStringA("ERROR: Failed to validate shader program. OpenGL reports the following error message:\n");
+		OutputDebugStringA(buffer);
+		OutputDebugStringA("\n");
+		return false;
+	}
+
+	if (vert_shader_code != 0) glDeleteShader(vert_shader);
+	if (frag_shader_code != 0) glDeleteShader(frag_shader);
+	if (comp_shader_code != 0) glDeleteShader(comp_shader);
+
+	return true;
 }
 
 int
@@ -436,7 +551,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 		glDebugMessageCallback(GLDebugProc, 0);
 
 		{ /// Upload display program
-			u8* vert_shader_code =
+			GLchar* vert_shader_code = (GLchar*)
 				"#version 450 core\n"
 				"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
 				"\n"
@@ -452,7 +567,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				"}\n"
 			;
 
-			u8* frag_shader_code =
+			GLchar* frag_shader_code = (GLchar*)
 				"#version 450 core\n"
 				"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
 				"\n"
@@ -474,75 +589,11 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				"}\n"
 			;
 
-			GLuint vert_shader = glCreateShader(GL_VERTEX_SHADER);
-			glShaderSource(vert_shader, 1, &vert_shader_code, 0);
-			glCompileShader(vert_shader);
-
-			GLint status;
-			glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &status);
-			if (status == 0)
+			if (!CreateShaderProgram(vert_shader_code, frag_shader_code, 0, &disp_program))
 			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetShaderInfoLog(vert_shader, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to compile vertex shader. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
 				failed_setup = true;
 				break;
 			}
-
-			GLuint frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-			glShaderSource(frag_shader, 1, &frag_shader_code, 0);
-			glCompileShader(frag_shader);
-
-			glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &status);
-			if (status == 0)
-			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetShaderInfoLog(frag_shader, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to compile fragment shader. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
-				failed_setup = true;
-				break;
-			}
-
-			disp_program = glCreateProgram();
-			glAttachShader(disp_program, vert_shader);
-			glAttachShader(disp_program, frag_shader);
-			glLinkProgram(disp_program);
-
-			glGetProgramiv(disp_program, GL_LINK_STATUS, &status);
-			if (status == 0)
-			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetProgramInfoLog(disp_program, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to link display disp_program. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
-				failed_setup = true;
-				break;
-			}
-
-			glValidateProgram(disp_program);
-			glGetProgramiv(disp_program, GL_VALIDATE_STATUS, &status);
-			if (status == 0)
-			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetProgramInfoLog(disp_program, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to validate display disp_program. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
-				failed_setup = true;
-				break;
-			}
-
-			glDeleteShader(vert_shader);
-			glDeleteShader(frag_shader);
 		}
 
 		{ /// Upload tracing compute program
@@ -557,7 +608,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			}
 
 			LARGE_INTEGER file_size;
-			u32 read_bytes;
+			DWORD read_bytes = 0;
 			if (!GetFileSizeEx(comp_shader_code_file, &file_size))
 			{
 				//// ERROR
@@ -577,10 +628,10 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				failed_setup = true;
 			}
 
-			u32 comp_shader_code_size = read_bytes;
-
 			CloseHandle(comp_shader_code_file);
 			if (failed_setup) break;
+
+			u32 comp_shader_code_size = read_bytes;
 
 			HANDLE comp_pcg_code_file = CreateFileW(L"..\\vendor\\pcg32\\pcg32.glsl", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 			if (comp_pcg_code_file == INVALID_HANDLE_VALUE)
@@ -615,56 +666,11 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			CloseHandle(comp_pcg_code_file);
 			if (failed_setup) break;
 
-			GLint status;
-			GLuint comp_shader = glCreateShader(GL_COMPUTE_SHADER);
-			glShaderSource(comp_shader, 1, &scratch_memory, 0);
-			glCompileShader(comp_shader);
-
-			glGetShaderiv(comp_shader, GL_COMPILE_STATUS, &status);
-			if (status == 0)
+			if (!CreateShaderProgram(0, 0, (GLchar*)scratch_memory, &tracing_program))
 			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetShaderInfoLog(comp_shader, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to compile tracing compute shader. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
 				failed_setup = true;
 				break;
 			}
-
-			tracing_program = glCreateProgram();
-			glAttachShader(tracing_program, comp_shader);
-			glLinkProgram(tracing_program);
-
-			glGetProgramiv(tracing_program, GL_LINK_STATUS, &status);
-			if (status == 0)
-			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetProgramInfoLog(tracing_program, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to link tracing compute program. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
-				failed_setup = true;
-				break;
-			}
-
-			glValidateProgram(tracing_program);
-			glGetProgramiv(tracing_program, GL_VALIDATE_STATUS, &status);
-			if (status == 0)
-			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetProgramInfoLog(tracing_program, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to validate tracing compute program. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
-				failed_setup = true;
-				break;
-			}
-
-			glDeleteShader(comp_shader);
 		}
 
 		{ /// Upload conversion compute program
@@ -679,7 +685,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			}
 
 			LARGE_INTEGER file_size;
-			u32 read_bytes;
+			DWORD read_bytes = 0;
 			if (!GetFileSizeEx(comp_shader_code_file, &file_size))
 			{
 				//// ERROR
@@ -699,61 +705,16 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 				failed_setup = true;
 			}
 
-			scratch_memory[read_bytes] = 0;
-
 			CloseHandle(comp_shader_code_file);
 			if (failed_setup) break;
 
-			GLint status;
-			GLuint comp_shader = glCreateShader(GL_COMPUTE_SHADER);
-			glShaderSource(comp_shader, 1, &scratch_memory, 0);
-			glCompileShader(comp_shader);
+			scratch_memory[read_bytes] = 0;
 
-			glGetShaderiv(comp_shader, GL_COMPILE_STATUS, &status);
-			if (status == 0)
+			if (!CreateShaderProgram(0, 0, (GLchar*)scratch_memory, &conversion_program))
 			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetShaderInfoLog(comp_shader, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to compile conversion compute shader. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
 				failed_setup = true;
 				break;
 			}
-
-			conversion_program = glCreateProgram();
-			glAttachShader(conversion_program, comp_shader);
-			glLinkProgram(conversion_program);
-
-			glGetProgramiv(conversion_program, GL_LINK_STATUS, &status);
-			if (status == 0)
-			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetProgramInfoLog(conversion_program, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to link conversion compute program. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
-				failed_setup = true;
-				break;
-			}
-
-			glValidateProgram(conversion_program);
-			glGetProgramiv(conversion_program, GL_VALIDATE_STATUS, &status);
-			if (status == 0)
-			{
-				//// ERROR
-				u8 buffer[1024];
-				glGetProgramInfoLog(conversion_program, ARRAY_SIZE(buffer), 0, buffer);
-				OutputDebugStringA("ERROR: Failed to validate conversion compute program. OpenGL reports the following error message:\n");
-				OutputDebugStringA(buffer);
-				OutputDebugStringA("\n");
-				failed_setup = true;
-				break;
-			}
-
-			glDeleteShader(comp_shader);
 		}
 
 		{ /// Prepare tracing textures
@@ -764,7 +725,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)texture_width, (GLsizei)texture_height, 0, GL_RGBA, GL_FLOAT, 0);
 			glBindImageTexture(0, display_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
 
 			glActiveTexture(GL_TEXTURE1);
@@ -774,7 +735,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)texture_width, (GLsizei)texture_height, 0, GL_RGBA, GL_FLOAT, 0);
 			glBindImageTexture(0, sum_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
 
 			glActiveTexture(GL_TEXTURE2);
@@ -784,7 +745,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)texture_width, (GLsizei)texture_height, 0, GL_RGBA, GL_FLOAT, 0);
 			glBindImageTexture(0, compensation_texture, 0, 0, 0, GL_READ_WRITE, GL_RGBA32F);
 		}
 
@@ -816,9 +777,9 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 
 			RECT client_rect;
 			GetClientRect(window, &client_rect);
-			u32 width  = client_rect.right - client_rect.left;
-			u32 height = client_rect.bottom - client_rect.top;
-			glViewport(0, 0, width, height);
+			u32 width  = (u32)(client_rect.right - client_rect.left);
+			u32 height = (u32)(client_rect.bottom - client_rect.top);
+			glViewport(0, 0, (GLsizei)width, (GLsizei)height);
 
 			if (texture_width != width || texture_height != height)
 			{
@@ -827,17 +788,17 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 
 				glActiveTexture(GL_TEXTURE0);
 				glBindTexture(GL_TEXTURE_2D, display_texture);
-				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)texture_width, (GLsizei)texture_height, 0, GL_RGBA, GL_FLOAT, 0);
 
 				glActiveTexture(GL_TEXTURE1);
 				glBindTexture(GL_TEXTURE_2D, sum_texture);
-				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)texture_width, (GLsizei)texture_height, 0, GL_RGBA, GL_FLOAT, 0);
 				float f[4] = {0, 0, 0, 0};
 				glClearTexImage(sum_texture, 0, GL_RGBA, GL_FLOAT, f);
 
 				glActiveTexture(GL_TEXTURE2);
 				glBindTexture(GL_TEXTURE_2D, compensation_texture);
-				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, texture_width, texture_height, 0, GL_RGBA, GL_FLOAT, 0);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)texture_width, (GLsizei)texture_height, 0, GL_RGBA, GL_FLOAT, 0);
 				glClearTexImage(compensation_texture, 0, GL_RGBA, GL_FLOAT, f);
 
 				glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
