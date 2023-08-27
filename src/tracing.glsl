@@ -176,9 +176,9 @@ Sphere Spheres[] = Sphere[](
 		MATERIAL_DIFFUSE
 	),
 	Sphere(
-		vec3(BoxWidth/2 - 4.1, -BoxHeight/2 + 6, -BoxDepth/2 + 4.1),
-		4,
-		vec3(1.769, 0, 0),
+		vec3(BoxWidth/2 - 7, -BoxHeight/2 + 6, -BoxDepth/2 + 10),
+		3,
+		vec3(1.7, 0, 0),
 		MATERIAL_REFRACTIVE
 	),
 	Sphere(
@@ -216,30 +216,6 @@ CastRay(vec3 origin, vec3 ray, bool is_transmitted_ray)
 
 #define AIR_IOR 1.000293
 
-float
-Fresnel(vec3 ray, vec3 normal, float n1, float n2)
-{
-	// NOTE: https://en.wikipedia.org/wiki/Schlick%27s_approximation
-	//       https://blog.demofox.org/2017/01/09/raytracing-reflection-refraction-fresnel-total-internal-reflection-and-beers-law/
-	//       https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
-	
-	float n              = n1/n2;
-	float cos_theta_i    = dot(-ray, normal);
-	float sin_sq_theta_t = n*n*(1 - cos_theta_i*cos_theta_i);
-	float cos_theta_t    = sqrt(1 - sin_sq_theta_t);
-
-	float r = 1;
-	if (sin_sq_theta_t <= 1)
-	{
-		float r_s = (n1*cos_theta_i - n2*cos_theta_t)/(n1*cos_theta_i + n2*cos_theta_t);
-		float r_p = (n2*cos_theta_i - n1*cos_theta_t)/(n2*cos_theta_i + n1*cos_theta_t);
-
-		r = (r_s*r_s + r_p*r_p)/2;
-	}
-
-	return r;
-}
-
 void
 main()
 {
@@ -249,12 +225,10 @@ main()
 
 	ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
 	if (pos.x >= Resolution.x || pos.y >= Resolution.y) return;
-
 	vec2 uv = pos/Resolution;
 
-	float half_fov = PI_OVER_4;
-
 	vec2 image_plane_dim = vec2(1, Resolution.y/Resolution.x);
+	float half_fov       = PI_OVER_4;
 	float focal_len      = 1/(2*tan(half_fov));
 
 	vec3 origin = vec3(0);
@@ -262,15 +236,11 @@ main()
 	vec3 image_plane_origin = vec3(-image_plane_dim/2, -focal_len);
 	vec3 ray                = normalize(image_plane_origin + vec3(image_plane_dim*uv, 0));
 
-	bool use_di = (gl_GlobalInvocationID.x >= (gl_NumWorkGroups.x*gl_WorkGroupSize.x)/2);
-	//bool use_di = ((gl_GlobalInvocationID.y/100)%2 == 0);
-	use_di = true;
-
 	vec3 color              = vec3(0);
 	vec3 multiplier         = vec3(1);
 	bool last_was_diffuse   = false;
 	bool is_transmitted_ray = false;
-	for (uint bounce = 0; bounce < 100; ++bounce)
+	for (uint bounce = 0; bounce < 10; ++bounce)
 	{
 		Hit_Data hit = CastRay(origin, ray, is_transmitted_ray);
 
@@ -281,17 +251,21 @@ main()
 		{
 			if (Spheres[hit.idx].material == MATERIAL_LIGHT)
 			{
-				if (bounce == 0 || !last_was_diffuse || !use_di) color += multiplier*Spheres[hit.idx].color;
+				if (bounce == 0 || !last_was_diffuse) color += multiplier*Spheres[hit.idx].color;
 				break;
 			}
 			else if (Spheres[hit.idx].material == MATERIAL_REFLECTIVE)
 			{
 				origin           = new_origin;
-				ray              = reflect(ray, hit.normal);
+				ray              = ray + 2*dot(-ray, hit.normal)*hit.normal;
 				last_was_diffuse = false;
 			}
 			else if (Spheres[hit.idx].material == MATERIAL_REFRACTIVE)
 			{
+				// NOTE: https://en.wikipedia.org/wiki/Schlick%27s_approximation
+				//       https://blog.demofox.org/2017/01/09/raytracing-reflection-refraction-fresnel-total-internal-reflection-and-beers-law/
+				//       https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
+				
 				float ior = Spheres[hit.idx].color.r;
 
 				float n1 = AIR_IOR;
@@ -302,17 +276,37 @@ main()
 					n2 = AIR_IOR;
 				}
 
-				if (Random01() <= Fresnel(ray, hit.normal, n1, n2))
+				float eta            = n1/n2;
+				float cos_theta_i    = dot(-ray, hit.normal);
+				float sin_sq_theta_t = eta*eta*(1 - cos_theta_i*cos_theta_i);
+				float cos_theta_t    = sqrt(1 - sin_sq_theta_t);
+
+				float r = 1;
+				if (sin_sq_theta_t <= 1)
+				{
+					float r_s = (n1*cos_theta_i - n2*cos_theta_t)/(n1*cos_theta_i + n2*cos_theta_t);
+					float r_p = (n2*cos_theta_i - n1*cos_theta_t)/(n2*cos_theta_i + n1*cos_theta_t);
+
+					r = (r_s*r_s + r_p*r_p)/2;
+				}
+
+				if (Random01() <= r)
 				{
 					origin             = new_origin;
-					ray                = reflect(ray, hit.normal);
+					ray                = ray + 2*cos_theta_i*hit.normal;
 					last_was_diffuse   = false;
 					is_transmitted_ray = is_transmitted_ray;
 				}
 				else
 				{
+					// NOTE: BTDF from: https://www.youtube.com/watch?v=sg2xdcB8M3c&list=PLmIqTlJ6KsE2yXzeq02hqCDpOdtj6n6A9&index=12
+					//       Not necessary when the exit interface is the inverse of the enter interface, this is also the case
+					//       when total internal reflection happens.
+					//float btdf = (n2*n2)/(n1*n1);
+					//multiplier *= btdf;
+					
 					origin             = new_origin;
-					ray                = refract(ray, hit.normal, n1/n2);
+					ray                = eta*ray + (eta*cos_theta_i - cos_theta_t)*hit.normal;
 					last_was_diffuse   = false;
 					is_transmitted_ray = !is_transmitted_ray;
 				}
@@ -326,12 +320,12 @@ main()
 				vec3 to_light_n = normalize(to_light);
 
 				Hit_Data shadow_hit = CastRay(new_origin, to_light_n, false);
-				if (shadow_hit.is_valid && shadow_hit.idx == light_sphere_idx && use_di)
+				if (shadow_hit.is_valid && shadow_hit.idx == light_sphere_idx)
 				{
-					vec3 brdf  = Spheres[hit.idx].color*ONE_OVER_PI;
-					vec3 light = Spheres[light_sphere_idx].color;
+					vec3 brdf           = Spheres[hit.idx].color*ONE_OVER_PI;
+					vec3 light          = Spheres[light_sphere_idx].color;
 					float geom_coupling = (dot(to_light_n, hit.normal)*dot(-to_light_n, shadow_hit.normal))/dot(to_light, to_light);
-					float res_pdf = PI*Spheres[light_sphere_idx].r*Spheres[light_sphere_idx].r;
+					float res_pdf       = PI*Spheres[light_sphere_idx].r*Spheres[light_sphere_idx].r;
 
 					color += multiplier*brdf*light*geom_coupling*res_pdf;
 				}

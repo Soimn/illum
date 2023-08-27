@@ -390,7 +390,7 @@ CreateShaderProgram(GLchar* vert_shader_code, GLchar* frag_shader_code, GLchar* 
 			OutputDebugStringA("ERROR: Failed to compile vertex shader. OpenGL reports the following error message:\n");
 			OutputDebugStringA(buffer);
 			OutputDebugStringA("\n");
-			return true;
+			return false;
 		}
 	}
 
@@ -408,7 +408,7 @@ CreateShaderProgram(GLchar* vert_shader_code, GLchar* frag_shader_code, GLchar* 
 			OutputDebugStringA("ERROR: Failed to compile fragment shader. OpenGL reports the following error message:\n");
 			OutputDebugStringA(buffer);
 			OutputDebugStringA("\n");
-			return true;
+			return false;
 		}
 	}
 
@@ -426,7 +426,7 @@ CreateShaderProgram(GLchar* vert_shader_code, GLchar* frag_shader_code, GLchar* 
 			OutputDebugStringA("ERROR: Failed to compile compute shader. OpenGL reports the following error message:\n");
 			OutputDebugStringA(buffer);
 			OutputDebugStringA("\n");
-			return true;
+			return false;
 		}
 	}
 
