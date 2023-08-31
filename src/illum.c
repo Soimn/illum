@@ -66,6 +66,8 @@ String_Match(String s0, String s1)
 
 static bool Running = false;
 
+#include "packed_shaders.h"
+
 static String RequiredGLExtensions[] = {
 	ISTRING("WGL_ARB_pixel_format"),
 	ISTRING("WGL_ARB_create_context"),
@@ -366,106 +368,6 @@ GLDebugProc(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei leng
 	}
 }
 
-bool
-CreateShaderProgram(GLchar* vert_shader_code, GLchar* frag_shader_code, GLchar* comp_shader_code, GLuint* program)
-{
-	GLint status;
-	GLchar buffer[1024];
-
-	GLuint vert_shader = 0;
-	GLuint frag_shader = 0;
-	GLuint comp_shader = 0;
-
-	if (vert_shader_code != 0)
-	{
-		vert_shader = glCreateShader(GL_VERTEX_SHADER);
-		glShaderSource(vert_shader, 1, (GLchar**)&vert_shader_code, 0);
-		glCompileShader(vert_shader);
-
-		glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &status);
-		if (status == 0)
-		{
-			//// ERROR
-			glGetShaderInfoLog(vert_shader, ARRAY_SIZE(buffer), 0, buffer);
-			OutputDebugStringA("ERROR: Failed to compile vertex shader. OpenGL reports the following error message:\n");
-			OutputDebugStringA(buffer);
-			OutputDebugStringA("\n");
-			return false;
-		}
-	}
-
-	if (frag_shader_code != 0)
-	{
-		frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-		glShaderSource(frag_shader, 1, (GLchar**)&frag_shader_code, 0);
-		glCompileShader(frag_shader);
-
-		glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &status);
-		if (status == 0)
-		{
-			//// ERROR
-			glGetShaderInfoLog(frag_shader, ARRAY_SIZE(buffer), 0, buffer);
-			OutputDebugStringA("ERROR: Failed to compile fragment shader. OpenGL reports the following error message:\n");
-			OutputDebugStringA(buffer);
-			OutputDebugStringA("\n");
-			return false;
-		}
-	}
-
-	if (comp_shader_code != 0)
-	{
-		comp_shader = glCreateShader(GL_COMPUTE_SHADER);
-		glShaderSource(comp_shader, 1, (GLchar**)&comp_shader_code, 0);
-		glCompileShader(comp_shader);
-
-		glGetShaderiv(comp_shader, GL_COMPILE_STATUS, &status);
-		if (status == 0)
-		{
-			//// ERROR
-			glGetShaderInfoLog(comp_shader, ARRAY_SIZE(buffer), 0, buffer);
-			OutputDebugStringA("ERROR: Failed to compile compute shader. OpenGL reports the following error message:\n");
-			OutputDebugStringA(buffer);
-			OutputDebugStringA("\n");
-			return false;
-		}
-	}
-
-	*program = glCreateProgram();
-	if (vert_shader_code != 0) glAttachShader(*program, vert_shader);
-	if (frag_shader_code != 0) glAttachShader(*program, frag_shader);
-	if (comp_shader_code != 0) glAttachShader(*program, comp_shader);
-	glLinkProgram(*program);
-
-	glGetProgramiv(*program, GL_LINK_STATUS, &status);
-	if (status == 0)
-	{
-		//// ERROR
-		glGetProgramInfoLog(*program, ARRAY_SIZE(buffer), 0, buffer);
-		OutputDebugStringA("ERROR: Failed to link shader program. OpenGL reports the following error message:\n");
-		OutputDebugStringA(buffer);
-		OutputDebugStringA("\n");
-		return false;
-	}
-
-	glValidateProgram(*program);
-	glGetProgramiv(*program, GL_VALIDATE_STATUS, &status);
-	if (status == 0)
-	{
-		//// ERROR
-		glGetProgramInfoLog(*program, ARRAY_SIZE(buffer), 0, buffer);
-		OutputDebugStringA("ERROR: Failed to validate shader program. OpenGL reports the following error message:\n");
-		OutputDebugStringA(buffer);
-		OutputDebugStringA("\n");
-		return false;
-	}
-
-	if (vert_shader_code != 0) glDeleteShader(vert_shader);
-	if (frag_shader_code != 0) glDeleteShader(frag_shader);
-	if (comp_shader_code != 0) glDeleteShader(comp_shader);
-
-	return true;
-}
-
 int
 wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_cmd)
 {
@@ -550,170 +452,143 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
 		glDebugMessageCallback(GLDebugProc, 0);
 
-		{ /// Upload display program
-			GLchar* vert_shader_code = (GLchar*)
-				"#version 450 core\n"
-				"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
-				"\n"
-				"out gl_PerVertex { vec4 gl_Position; };\n"
-				"out vec2 uv;\n"
-				"\n"
-				"void\n"
-				"main()\n"
-				"{\n"
-				"  vec2 a = vec2(gl_VertexID%2, gl_VertexID/2);\n"
-				"  gl_Position = vec4(a*4 - 1, 0, 1);\n"
-				"  uv = a*2;\n"
-				"}\n"
-			;
+		{ /// Upload shaders
+			struct {
+				GLuint* program;
+				GLchar** vert_shader_code;
+				GLsizei vert_shader_count;
+				GLchar** frag_shader_code;
+				GLsizei frag_shader_count;
+				GLchar** comp_shader_code;
+				GLsizei comp_shader_count;
+			} shaders[] = {
+				{
+					.program = &disp_program,
+					.vert_shader_code  = &display_vert_shader_code,
+					.vert_shader_count = 1,
+					.frag_shader_code  = &display_frag_shader_code,
+					.frag_shader_count = 1,
+				},
+				{
+					.program = &tracing_program,
+					.comp_shader_code  = (GLchar*[]){ tracing_shader_code, pcg32_shader_code },
+					.comp_shader_count = 2,
+				},
+				{
+					.program = &conversion_program,
+					.comp_shader_code  = &conversion_shader_code,
+					.comp_shader_count = 1,
+				},
+			};
 
-			GLchar* frag_shader_code = (GLchar*)
-				"#version 450 core\n"
-				"#line " STRINGIFY(__LINE__) "\n" // NOTE: trick from https://gist.github.com/mmozeiko/6825cb94d393cb4032d250b8e7cc9d14#file-win32_opengl_multi-c-L446
-				"\n"
-				"layout(location = 0) uniform vec2 Resolution;\n"
-				"\n"
-				"uniform sampler2D DisplayTexture;\n"
-				"\n"
-				"in vec2 uv;\n"
-				"\n"
-				"out vec4 color;\n"
-				"\n"
-				"void\n"
-				"main()\n"
-				"{\n"
-				/*"  vec2 uv = gl_FragCoord.xy / Resolution;\n"
-				"  vec2 auv = (2*uv - 1) * vec2(1, Resolution.y/Resolution.x);\n"
-				"  color = vec4((length(auv) < 0.5 ? uv : vec2(0)), 0, 1);\n"*/
-				"  color = vec4(texture(DisplayTexture, uv).rgb, 1);\n"
-				"}\n"
-			;
-
-			if (!CreateShaderProgram(vert_shader_code, frag_shader_code, 0, &disp_program))
+			for (umm i = 0; i < ARRAY_SIZE(shaders); ++i)
 			{
-				failed_setup = true;
-				break;
-			}
-		}
+				GLuint* program           = shaders[i].program;
+				GLchar** vert_shader_code = shaders[i].vert_shader_code;
+				GLsizei vert_shader_count = shaders[i].vert_shader_count;
+				GLchar** frag_shader_code = shaders[i].frag_shader_code;
+				GLsizei frag_shader_count = shaders[i].frag_shader_count;
+				GLchar** comp_shader_code = shaders[i].comp_shader_code;
+				GLsizei comp_shader_count = shaders[i].comp_shader_count;
 
-		{ /// Upload tracing compute program
-			// TODO: Decide on where resources should be stored
-			HANDLE comp_shader_code_file = CreateFileW(L"..\\src\\tracing.glsl", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-			if (comp_shader_code_file == INVALID_HANDLE_VALUE)
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Failed to open tracing compute shader file\n");
-				failed_setup = true;
-				break;
-			}
+				GLint status;
+				GLchar buffer[1024];
 
-			LARGE_INTEGER file_size;
-			DWORD read_bytes = 0;
-			if (!GetFileSizeEx(comp_shader_code_file, &file_size))
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Failed to query size of tracing compute shader file\n");
-				failed_setup = true;
-			}
-			else if (file_size.HighPart != 0 || file_size.LowPart+1 > scratch_memory_size)
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Tracing compute shader file is too large\n");
-				failed_setup = true;
-			}
-			else if (!ReadFile(comp_shader_code_file, scratch_memory, file_size.LowPart, &read_bytes, 0) || read_bytes != file_size.LowPart)
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Failed to read tracing compute shader file\n");
-				failed_setup = true;
-			}
+				GLuint vert_shader = 0;
+				GLuint frag_shader = 0;
+				GLuint comp_shader = 0;
 
-			CloseHandle(comp_shader_code_file);
-			if (failed_setup) break;
+				if (vert_shader_count != 0)
+				{
+					vert_shader = glCreateShader(GL_VERTEX_SHADER);
+					glShaderSource(vert_shader, vert_shader_count, vert_shader_code, 0);
+					glCompileShader(vert_shader);
 
-			u32 comp_shader_code_size = read_bytes;
+					glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &status);
+					if (status == 0)
+					{
+						//// ERROR
+						glGetShaderInfoLog(vert_shader, ARRAY_SIZE(buffer), 0, buffer);
+						OutputDebugStringA("ERROR: Failed to compile vertex shader. OpenGL reports the following error message:\n");
+						OutputDebugStringA(buffer);
+						OutputDebugStringA("\n");
+						failed_setup = true;
+						break;
+					}
+				}
 
-			HANDLE comp_pcg_code_file = CreateFileW(L"..\\vendor\\pcg32\\pcg32.glsl", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-			if (comp_pcg_code_file == INVALID_HANDLE_VALUE)
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Failed to open pcg32 compute shader file\n");
-				failed_setup = true;
-				break;
-			}
+				if (frag_shader_count != 0)
+				{
+					frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
+					glShaderSource(frag_shader, frag_shader_count, frag_shader_code, 0);
+					glCompileShader(frag_shader);
 
-			if (!GetFileSizeEx(comp_pcg_code_file, &file_size))
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Failed to query size of pcg32 compute shader file\n");
-				failed_setup = true;
-			}
-			else if (file_size.HighPart != 0 || file_size.LowPart+1 + comp_shader_code_size > scratch_memory_size)
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: pcg32 compute shader file is too large\n");
-				failed_setup = true;
-			}
-			else if (!ReadFile(comp_pcg_code_file, scratch_memory + comp_shader_code_size, file_size.LowPart, &read_bytes, 0) || read_bytes != file_size.LowPart)
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Failed to read pcg32 compute shader file\n");
-				failed_setup = true;
-			}
+					glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &status);
+					if (status == 0)
+					{
+						//// ERROR
+						glGetShaderInfoLog(frag_shader, ARRAY_SIZE(buffer), 0, buffer);
+						OutputDebugStringA("ERROR: Failed to compile fragment shader. OpenGL reports the following error message:\n");
+						OutputDebugStringA(buffer);
+						OutputDebugStringA("\n");
+						failed_setup = true;
+						break;
+					}
+				}
 
-			scratch_memory[comp_shader_code_size + read_bytes] = 0;
+				if (comp_shader_count != 0)
+				{
+					comp_shader = glCreateShader(GL_COMPUTE_SHADER);
+					glShaderSource(comp_shader, comp_shader_count, comp_shader_code, 0);
+					glCompileShader(comp_shader);
 
-			CloseHandle(comp_pcg_code_file);
-			if (failed_setup) break;
+					glGetShaderiv(comp_shader, GL_COMPILE_STATUS, &status);
+					if (status == 0)
+					{
+						//// ERROR
+						glGetShaderInfoLog(comp_shader, ARRAY_SIZE(buffer), 0, buffer);
+						OutputDebugStringA("ERROR: Failed to compile compute shader. OpenGL reports the following error message:\n");
+						OutputDebugStringA(buffer);
+						OutputDebugStringA("\n");
+						failed_setup = true;
+						break;
+					}
+				}
 
-			if (!CreateShaderProgram(0, 0, (GLchar*)scratch_memory, &tracing_program))
-			{
-				failed_setup = true;
-				break;
-			}
-		}
+				*program = glCreateProgram();
+				if (vert_shader_code != 0) glAttachShader(*program, vert_shader);
+				if (frag_shader_code != 0) glAttachShader(*program, frag_shader);
+				if (comp_shader_code != 0) glAttachShader(*program, comp_shader);
+				glLinkProgram(*program);
 
-		{ /// Upload conversion compute program
-			// TODO: Decide on where resources should be stored
-			HANDLE comp_shader_code_file = CreateFileW(L"..\\src\\conversion.glsl", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-			if (comp_shader_code_file == INVALID_HANDLE_VALUE)
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Failed to open conversion compute shader file\n");
-				failed_setup = true;
-				break;
-			}
+				glGetProgramiv(*program, GL_LINK_STATUS, &status);
+				if (status == 0)
+				{
+					//// ERROR
+					glGetProgramInfoLog(*program, ARRAY_SIZE(buffer), 0, buffer);
+					OutputDebugStringA("ERROR: Failed to link shader program. OpenGL reports the following error message:\n");
+					OutputDebugStringA(buffer);
+					OutputDebugStringA("\n");
+					failed_setup = true;
+					break;
+				}
 
-			LARGE_INTEGER file_size;
-			DWORD read_bytes = 0;
-			if (!GetFileSizeEx(comp_shader_code_file, &file_size))
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Failed to query size of conversion compute shader file\n");
-				failed_setup = true;
-			}
-			else if (file_size.HighPart != 0 || file_size.LowPart+1 > scratch_memory_size)
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: conversion compute shader file is too large\n");
-				failed_setup = true;
-			}
-			else if (!ReadFile(comp_shader_code_file, scratch_memory, file_size.LowPart, &read_bytes, 0) || read_bytes != file_size.LowPart)
-			{
-				//// ERROR
-				OutputDebugStringA("ERROR: Failed to read conversion compute shader file\n");
-				failed_setup = true;
-			}
+				glValidateProgram(*program);
+				glGetProgramiv(*program, GL_VALIDATE_STATUS, &status);
+				if (status == 0)
+				{
+					//// ERROR
+					glGetProgramInfoLog(*program, ARRAY_SIZE(buffer), 0, buffer);
+					OutputDebugStringA("ERROR: Failed to validate shader program. OpenGL reports the following error message:\n");
+					OutputDebugStringA(buffer);
+					OutputDebugStringA("\n");
+					failed_setup = true;
+					break;
+				}
 
-			CloseHandle(comp_shader_code_file);
-			if (failed_setup) break;
-
-			scratch_memory[read_bytes] = 0;
-
-			if (!CreateShaderProgram(0, 0, (GLchar*)scratch_memory, &conversion_program))
-			{
-				failed_setup = true;
-				break;
+				if (vert_shader_code != 0) glDeleteShader(vert_shader);
+				if (frag_shader_code != 0) glDeleteShader(frag_shader);
+				if (comp_shader_code != 0) glDeleteShader(comp_shader);
 			}
 		}
 
