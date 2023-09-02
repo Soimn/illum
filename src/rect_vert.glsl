@@ -13,20 +13,17 @@ main()
 {
 	vec2 vertex = vec2(int(((gl_VertexID + 1) % 6)/3), int(((gl_VertexID + 5) % 6)/3));
 
-	vec2 dim       = 2*PosDim.zw/Resolution;
-	vec3 pos       = vec3(2*vec2(PosDim.x, Resolution.y - PosDim.y)/Resolution - 1, ZRotLine.x);
-	float rot      = ZRotLine.y;
-	vec2 thickness = vec2(ZRotLine.z/PosDim.z, ZRotLine.z/PosDim.w);
+	vec2 centered_vertex = vertex - 0.5;
+	vec2 scaled_vertex   = centered_vertex*vec2(1, PosDim.w/PosDim.z);
 
-	float cos_theta = cos(rot);
-	float sin_theta = sin(rot);
+	float cos_theta = cos(ZRotLine.y);
+	float sin_theta = sin(ZRotLine.y);
+	vec2 rotated_vertex = mat2(cos_theta, sin_theta, -sin_theta, cos_theta)*scaled_vertex;
 
-	vec2 scaled_vertex  = vertex*dim - dim/2;
-	vec2 rotated_vertex = vec2(cos_theta*scaled_vertex.x - sin_theta*scaled_vertex.y, sin_theta*scaled_vertex.x + cos_theta*scaled_vertex.y);
+	float aspect_ratio = Resolution.x/Resolution.y;
+	vec2 acorrected_vertex = rotated_vertex*vec2(1, aspect_ratio);
 
-	gl_Position    = vec4(rotated_vertex.x + pos.x, rotated_vertex.y + pos.y, pos.z, 1);
-	uv             = vertex.xy;
-	line_thickness = thickness;
-
-	// TODO: Fix rotation and z layering
+	gl_Position    = vec4(acorrected_vertex, ZRotLine.x, 1);
+	uv             = vertex;
+	line_thickness = vec2(ZRotLine.z/PosDim.x, ZRotLine.z/PosDim.y * aspect_ratio);
 }
