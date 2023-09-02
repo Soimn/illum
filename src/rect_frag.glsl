@@ -11,6 +11,6 @@ void
 main()
 {
 	vec2 beta = -sign(abs(uv - 0.5) - 0.5 + line_thickness);
-	float alpha = 1 - (beta.x + beta.y)/2;
+	float alpha = 1 - max(0, beta.x + beta.y)/2;
 	color = Color*alpha;
 }
