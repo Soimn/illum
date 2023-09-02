@@ -187,6 +187,18 @@ Sphere Spheres[] = Sphere[](
 		vec3(1, 1, 1),
 		MATERIAL_REFLECTIVE
 	),
+	/*Sphere(
+		vec3(-BoxWidth/2 + 2.5, BoxHeight/2 - 4, -BoxDepth/2 + 4.4),
+		2,
+		vec3(1.000293, 1, 1),
+		MATERIAL_REFRACTIVE
+	),
+	Sphere(
+		vec3(BoxWidth/2 - 2.5, BoxHeight/2 - 4, -BoxDepth/2 + 4.4),
+		2,
+		vec3(9, 1, 1),
+		MATERIAL_REFRACTIVE
+	),*/
 	Sphere(
 		vec3(0, BoxHeight/2-4.5, -BoxDepth/2 + 6),
 		1,

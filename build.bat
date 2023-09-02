@@ -23,6 +23,8 @@ pack_shaders display_frag_shader_code ..\src\display_frag.glsl   >> packed_shade
 pack_shaders tracing_shader_code      ..\src\tracing.glsl        >> packed_shaders.h
 pack_shaders conversion_shader_code   ..\src\conversion.glsl     >> packed_shaders.h
 pack_shaders pcg32_shader_code        ..\vendor\pcg32\pcg32.glsl >> packed_shaders.h
+pack_shaders rect_vert_shader_code    ..\src\rect_vert.glsl      >> packed_shaders.h
+pack_shaders rect_frag_shader_code    ..\src\rect_frag.glsl      >> packed_shaders.h
 
 set "ignored_warnings= -Wno-unused-parameter -Wno-unused-function -Wno-missing-prototypes -Wno-cast-qual -Wno-comma -Wno-cast-align -Wno-incompatible-pointer-types-discards-qualifiers -Wno-unused-macros -Wno-unused-variable -Wno-overlength-strings"
 

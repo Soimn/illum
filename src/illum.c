@@ -81,6 +81,7 @@ static String RequiredGLExtensions[] = {
 	X(PFNWGLSWAPINTERVALEXTPROC, wglSwapIntervalEXT)         \
 	X(PFNGLUNIFORM2IPROC, glUniform2i)                       \
 	X(PFNGLUNIFORM2FPROC, glUniform2f)                       \
+	X(PFNGLUNIFORM4FPROC, glUniform4f)                       \
 	X(PFNGLCREATEVERTEXARRAYSPROC, glCreateVertexArrays)     \
 	X(PFNGLBINDVERTEXARRAYPROC, glBindVertexArray)           \
 	X(PFNGLCREATESHADERPROC, glCreateShader)                 \
@@ -389,6 +390,7 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 	GLuint disp_program       = 0;
 	GLuint tracing_program    = 0;
 	GLuint conversion_program = 0;
+	GLuint rect_program       = 0;
 
 	GLuint sum_texture          = 0;
 	GLuint compensation_texture = 0;
@@ -452,6 +454,9 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
 		glDebugMessageCallback(GLDebugProc, 0);
 
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
 		{ /// Upload shaders
 			struct {
 				GLuint* program;
@@ -478,6 +483,13 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 					.program = &conversion_program,
 					.comp_shader_code  = &conversion_shader_code,
 					.comp_shader_count = 1,
+				},
+				{
+					.program = &rect_program,
+					.vert_shader_code  = &rect_vert_shader_code,
+					.vert_shader_count = 1,
+					.frag_shader_code  = &rect_frag_shader_code,
+					.frag_shader_count = 1,
 				},
 			};
 
@@ -706,6 +718,14 @@ wWinMain(HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmd_line, int show_
 			glUseProgram(disp_program);
 			glUniform2f(0, (f32)width, (f32)height);
 			glDrawArrays(GL_TRIANGLES, 0, 3);
+
+			glBindVertexArray(default_vao);
+			glUseProgram(rect_program);
+			glUniform2f(0, (f32)width, (f32)height);
+			glUniform4f(1, (f32)(width/2), (f32)(height/2), 300, 100);
+			glUniform4f(2, 0, frame_index/60.0f, 10, 0);
+			glUniform4f(3, 1, 0, 1, 0.5);
+			glDrawArrays(GL_TRIANGLES, 0, 6);
 
 			SwapBuffers(dc);
 		}
